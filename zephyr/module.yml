@@ -1,4 +1,4 @@
-name: zmk_sleep_gpio
+name: zmk-driver-sleep-gpio
 build:
   cmake: .
   kconfig: Kconfig
