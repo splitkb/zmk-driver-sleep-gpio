@@ -1,0 +1,97 @@
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/pm/device.h> 
+
+#include <zmk/event_manager.h>
+#include <zmk/events/activity_state_changed.h>
+
+LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+
+#define DT_DRV_COMPAT splitkb_sleep_gpio
+
+struct sleep_gpio_config {
+    struct gpio_dt_spec gpio;
+};
+
+static int sleep_gpio_event_listener(const zmk_event_t *eh) {
+    const struct device *dev = DEVICE_DT_GET(DT_DRV_INST(0));
+    
+    if (!device_is_ready(dev)) {
+        return -ENODEV;
+    }
+
+    const struct sleep_gpio_config *config = dev->config;
+    struct zmk_activity_state_changed *ev = as_zmk_activity_state_changed(eh);
+    
+    if (ev) {
+        switch (ev->state) {
+            case ZMK_ACTIVITY_ACTIVE:
+            case ZMK_ACTIVITY_IDLE:
+                gpio_pin_set_dt(&config->gpio, 1);
+                break;
+            case ZMK_ACTIVITY_SLEEP:
+                gpio_pin_set_dt(&config->gpio, 0);
+                break;
+            default:
+                break;
+        }
+    }
+    return 0;
+}
+
+ZMK_LISTENER(sleep_gpio, sleep_gpio_event_listener);
+ZMK_SUBSCRIPTION(sleep_gpio, zmk_activity_state_changed);
+
+static int sleep_gpio_pm_action(const struct device *dev, enum pm_device_action action) {
+    const struct sleep_gpio_config *config = dev->config;
+
+    switch (action) {
+    case PM_DEVICE_ACTION_SUSPEND:
+    case PM_DEVICE_ACTION_TURN_OFF:
+        // Force input + pull-down to keep pin Low during System Off
+        gpio_pin_configure_dt(&config->gpio, GPIO_INPUT | GPIO_PULL_DOWN);
+        break;
+    case PM_DEVICE_ACTION_RESUME:
+        // Restore output High on wake
+        gpio_pin_configure_dt(&config->gpio, GPIO_OUTPUT_ACTIVE);
+        break;
+    default:
+        return -ENOTSUP;
+    }
+
+    return 0;
+}
+
+static int sleep_gpio_init(const struct device *dev) {
+    const struct sleep_gpio_config *config = dev->config;
+
+    if (!gpio_is_ready_dt(&config->gpio)) {
+        LOG_ERR("Sleep GPIO device not ready");
+        return -ENODEV;
+    }
+
+    int ret = gpio_pin_configure_dt(&config->gpio, GPIO_OUTPUT_ACTIVE);
+    if (ret < 0) {
+        return ret;
+    }
+
+    return 0;
+}
+
+static const struct sleep_gpio_config config = {
+    .gpio = GPIO_DT_SPEC_INST_GET(0, gpios),
+};
+
+PM_DEVICE_DEFINE(sleep_gpio_pm, sleep_gpio_pm_action);
+
+DEVICE_DT_INST_DEFINE(0, 
+    sleep_gpio_init, 
+    PM_DEVICE_GET(sleep_gpio_pm), 
+    NULL, 
+    &config, 
+    POST_KERNEL, 
+    CONFIG_APPLICATION_INIT_PRIORITY, 
+    NULL
+);

@@ -1,0 +1,10 @@
+description: GPIO pin controlled by ZMK sleep state
+compatible: "splitkb,sleep-gpio"
+
+include: base.yaml
+
+properties:
+    gpios:
+        type: phandle-array
+        required: true
+        description: The GPIO pin to control
