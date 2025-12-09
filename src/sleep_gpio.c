@@ -68,7 +68,12 @@ static int sleep_gpio_init(const struct device *dev) {
 
 static const struct sleep_gpio_config config = {
     .gpio = GPIO_DT_SPEC_INST_GET(0, gpios),
+
+#if DT_NODE_HAS_PROP(DT_NODELABEL(vik_spi), cs_gpios)
     .cs_gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(vik_spi), cs_gpios),
+#else
+    .cs_gpio = {0},
+#endif
 };
 
 PM_DEVICE_DEFINE(sleep_gpio_pm, sleep_gpio_pm_action);
