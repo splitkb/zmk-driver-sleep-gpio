@@ -13,36 +13,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 struct sleep_gpio_config {
     struct gpio_dt_spec gpio;
+    struct gpio_dt_spec cs_gpio;
 };
-
-static int sleep_gpio_event_listener(const zmk_event_t *eh) {
-    const struct device *dev = DEVICE_DT_GET(DT_DRV_INST(0));
-    
-    if (!device_is_ready(dev)) {
-        return -ENODEV;
-    }
-
-    const struct sleep_gpio_config *config = dev->config;
-    struct zmk_activity_state_changed *ev = as_zmk_activity_state_changed(eh);
-    
-    if (ev) {
-        switch (ev->state) {
-            case ZMK_ACTIVITY_ACTIVE:
-            case ZMK_ACTIVITY_IDLE:
-                gpio_pin_set_dt(&config->gpio, 1);
-                break;
-            case ZMK_ACTIVITY_SLEEP:
-                gpio_pin_set_dt(&config->gpio, 0);
-                break;
-            default:
-                break;
-        }
-    }
-    return 0;
-}
-
-ZMK_LISTENER(sleep_gpio, sleep_gpio_event_listener);
-ZMK_SUBSCRIPTION(sleep_gpio, zmk_activity_state_changed);
 
 static int sleep_gpio_pm_action(const struct device *dev, enum pm_device_action action) {
     const struct sleep_gpio_config *config = dev->config;
@@ -52,10 +24,16 @@ static int sleep_gpio_pm_action(const struct device *dev, enum pm_device_action 
     case PM_DEVICE_ACTION_TURN_OFF:
         // Force input + pull-down to keep pin Low during System Off
         gpio_pin_configure_dt(&config->gpio, GPIO_INPUT | GPIO_PULL_DOWN);
+        if (config->cs_gpio.port) {
+            gpio_pin_configure_dt(&config->cs_gpio, GPIO_INPUT | GPIO_PULL_DOWN);
+        }
         break;
     case PM_DEVICE_ACTION_RESUME:
         // Restore output High on wake
         gpio_pin_configure_dt(&config->gpio, GPIO_OUTPUT_ACTIVE);
+        if( config->cs_gpio.port) {
+            gpio_pin_configure_dt(&config->cs_gpio, GPIO_OUTPUT_INACTIVE);
+        }
         break;
     default:
         return -ENOTSUP;
@@ -77,11 +55,20 @@ static int sleep_gpio_init(const struct device *dev) {
         return ret;
     }
 
+    if (config->cs_gpio.port) {
+        if (!gpio_is_ready_dt(&config->cs_gpio)) {
+            LOG_ERR("CS GPIO device not ready");
+        } else {
+            gpio_pin_configure_dt(&config->cs_gpio, GPIO_OUTPUT_INACTIVE);
+        }
+    }
+
     return 0;
 }
 
 static const struct sleep_gpio_config config = {
     .gpio = GPIO_DT_SPEC_INST_GET(0, gpios),
+    .cs_gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(vik_spi), cs_gpios),
 };
 
 PM_DEVICE_DEFINE(sleep_gpio_pm, sleep_gpio_pm_action);
