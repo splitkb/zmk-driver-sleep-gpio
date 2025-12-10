@@ -3,9 +3,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/pm/device.h> 
-
-#include <zmk/event_manager.h>
-#include <zmk/events/activity_state_changed.h>
+#include <errno.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -14,6 +12,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 struct sleep_gpio_config {
     struct gpio_dt_spec gpio;
     struct gpio_dt_spec cs_gpio;
+    struct gpio_dt_spec dc_gpio;
+    struct gpio_dt_spec busy_gpio;
+    struct gpio_dt_spec reset_gpio;
 };
 
 static int sleep_gpio_pm_action(const struct device *dev, enum pm_device_action action) {
@@ -22,17 +23,36 @@ static int sleep_gpio_pm_action(const struct device *dev, enum pm_device_action 
     switch (action) {
     case PM_DEVICE_ACTION_SUSPEND:
     case PM_DEVICE_ACTION_TURN_OFF:
-        // Force input + pull-down to keep pin Low during System Off
         gpio_pin_configure_dt(&config->gpio, GPIO_INPUT | GPIO_PULL_DOWN);
+
         if (config->cs_gpio.port) {
-            gpio_pin_configure_dt(&config->cs_gpio, GPIO_INPUT | GPIO_PULL_DOWN);
+            gpio_pin_configure_dt(&config->cs_gpio, GPIO_INPUT);
+        }
+        if (config->dc_gpio.port) {
+            gpio_pin_configure_dt(&config->dc_gpio, GPIO_INPUT);
+        }
+        if (config->busy_gpio.port) {
+            gpio_pin_configure_dt(&config->busy_gpio, GPIO_INPUT);
+        }
+        if (config->reset_gpio.port) {
+            gpio_pin_configure_dt(&config->reset_gpio, GPIO_INPUT);
         }
         break;
+
     case PM_DEVICE_ACTION_RESUME:
-        // Restore output High on wake
         gpio_pin_configure_dt(&config->gpio, GPIO_OUTPUT_ACTIVE);
-        if( config->cs_gpio.port) {
+
+        if (config->cs_gpio.port) {
             gpio_pin_configure_dt(&config->cs_gpio, GPIO_OUTPUT_INACTIVE);
+        }
+        if (config->dc_gpio.port) {
+            gpio_pin_configure_dt(&config->dc_gpio, GPIO_OUTPUT_INACTIVE);
+        }
+        if (config->reset_gpio.port) {
+            gpio_pin_configure_dt(&config->reset_gpio, GPIO_OUTPUT_INACTIVE);
+        }
+        if (config->busy_gpio.port) {
+            gpio_pin_configure_dt(&config->busy_gpio, GPIO_INPUT);
         }
         break;
     default:
@@ -55,25 +75,16 @@ static int sleep_gpio_init(const struct device *dev) {
         return ret;
     }
 
-    if (config->cs_gpio.port) {
-        if (!gpio_is_ready_dt(&config->cs_gpio)) {
-            LOG_ERR("CS GPIO device not ready");
-        } else {
-            gpio_pin_configure_dt(&config->cs_gpio, GPIO_OUTPUT_INACTIVE);
-        }
-    }
-
     return 0;
 }
 
 static const struct sleep_gpio_config config = {
     .gpio = GPIO_DT_SPEC_INST_GET(0, gpios),
 
-#if DT_NODE_HAS_PROP(DT_NODELABEL(vik_spi), cs_gpios)
-    .cs_gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(vik_spi), cs_gpios),
-#else
-    .cs_gpio = {0},
-#endif
+    .cs_gpio = GPIO_DT_SPEC_GET_OR(DT_NODELABEL(vik_spi), cs_gpios, {0}),
+    .dc_gpio = GPIO_DT_SPEC_GET_OR(DT_NODELABEL(mipi_dbi_spi0), dc_gpios, {0}),
+    .reset_gpio = GPIO_DT_SPEC_GET_OR(DT_NODELABEL(mipi_dbi_spi0), reset_gpios, {0}),
+    .busy_gpio = GPIO_DT_SPEC_GET_OR(DT_NODELABEL(vik_ssd1680), busy_gpios, {0}),
 };
 
 PM_DEVICE_DEFINE(sleep_gpio_pm, sleep_gpio_pm_action);
